@@ -2,57 +2,55 @@ if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config()
 }
 
-const axios = require('axios')
-const fs = require('fs')
-const path = require('path')
-const https = require('https')
 
-const cert = fs.readFileSync(
-    path.resolve(__dirname, `../certs/${process.env.GN_CERT}`)
-)
+const express = require('express')
+const bodyParser = require('body-parser')
+const GNRequest = require('./apis/gerencianet')
 
-const agent = new https.Agent({
-    pfx: cert,
-    passphrase: ''
-})
+const app = express()
 
-const credentials = Buffer.from(
-    `${process.env.GN_CLIENT_ID}:${process.env.GN_CLIENT_SECRET}`
-).toString('base64')
+app.use(bodyParser.json())
 
-axios({
-    method: 'POST',
-    url: `${process.env.GN_ENDPOINT}/oauth/token`,
-    headers: {
-        Authorization: `Basic ${credentials}`,
-        'Content-Type': 'application/json'
-    },
-    httpsAgent: agent,
-    data: {
-        grant_type: 'client_credentials'
-    }
-}).then((response) => {
-    const accessToken = response.data?.access_token
+app.set('view engine', 'ejs')
+app.set('views', 'src/views')
 
-    const reqGN = axios.create({
-        baseURL: process.env.GN_ENDPOINT,
-        httpsAgent: agent,
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-        }
-    })
-
+const reqGNAlready = GNRequest({
+    clientID: process.env.GN_CLIENT_ID,
+    clientSecret: process.env.GN_CLIENT_SECRET
+  });
+  
+  app.get('/', async (req, res) => {
+    const reqGN = await reqGNAlready;
     const dataCob = {
-        calendario: {
-          expiracao: 3600
-        },
-        valor: {
-          original: "1.00"
-        },
-        chave: "empregospara@gamil.com",
-        solicitacaoPagador: "Cobrança dos serviços prestados."
-      }
+      calendario: {
+        expiracao: 3600
+      },
+      valor: {
+        original: '0.10'
+      },
+      chave: '126bec4a-2eb6-4b79-a045-78db68412899',
+      solicitacaoPagador: 'Cobrança dos serviços prestados.'
+    };
+  
+    const cobResponse = await reqGN.post('/v2/cob', dataCob);
+    const qrcodeResponse = await reqGN.get(`/v2/loc/${cobResponse.data.loc.id}/qrcode`);
+  
+    res.render('qrcode', { qrcodeImage: qrcodeResponse.data.imagemQrcode })
+  });
 
-      reqGN.post('/v2/cob', dataCob).then((response => console.log(response.data)))
+  app.get('/cobrancas', async(req, res) => {
+    const reqGN = await reqGNAlready;
+  
+    const cobResponse = await reqGN.get('/v2/cob?inicio=2024-10-09T16:01:35Z&fim=2024-10-22T23:59:00Z');
+  
+    res.send(cobResponse.data);
+  });
+
+  app.post('/webhook(/pix)?', (req, res) => {
+    console.log(req.body);
+    res.send('200');
+  });
+
+app.listen(8000, () => {
+    console.log('rodando')
 })
